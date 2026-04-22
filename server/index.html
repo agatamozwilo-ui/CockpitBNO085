@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Flight Instruments Test</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #222;
+      color: #fff;
+      margin: 0;
+      text-align: center;
+    }
+    h2 { margin: 16px 0 8px; }
+    .panel {
+      display: flex;
+      gap: 22px;
+      justify-content: center;
+      flex-wrap: wrap;
+      padding: 10px 0 6px;
+    }
+    canvas {
+      background: black;
+      border-radius: 50%;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+    .readout {
+      margin: 6px 0 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+      opacity: 0.9;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .controls {
+      margin-top: 6px;
+      padding-bottom: 22px;
+      display: none; /* sliders hidden when using Pico */
+    }
+    input { width: 340px; }
+    p { margin: 10px 0 6px; }
+
+    button {
+      margin: 12px;
+      padding: 10px 16px;
+      font-size: 16px;
+      border-radius: 10px;
+      border: 0;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Mælaborð Airbus A300-600ST Beluga</h2>
+  
+
+  <div>
+    <button id="connectBtn">Tengjast</button>
+  
+    <div id="status" style="opacity:.75;margin-top:4px;">Status: idle</div>
+  </div>
+
+  <div class="panel">
+    <div>
+      <div style="opacity:.85;margin-bottom:6px;">Attitude</div>
+      <canvas id="att" width="420" height="420"></canvas>
+    </div>
+    <div>
+      <div style="opacity:.85;margin-bottom:6px;">Heading</div>
+      <canvas id="hdg" width="300" height="300"></canvas>
+    </div>
+  </div>
+
+  <div class="readout" id="readout">Pitch: 0.0° | Roll: 0.0° | Yaw: 0.0°</div>
+
+  <div class="controls">
+    <p>Pitch</p>
+    <input type="range" min="-45" max="45" value="0" id="pitch" />
+
+    <p>Roll</p>
+    <input type="range" min="-90" max="90" value="0" id="roll" />
+
+    <p>Yaw</p>
+    <input type="range" min="-180" max="180" value="0" id="yaw" />
+  </div>
+
+  <script>
+    function deg2rad(d) { return d * Math.PI / 180; }
+
+    function wrap360(deg) {
+      let x = deg % 360;
+      if (x < 0) x += 360;
+      return x;
+    }
+
+    const readout = document.getElementById("readout");
+    const connectBtn = document.getElementById("connectBtn");
+    const statusEl = document.getElementById("status");
+
+    let pitch = 0;
+    let roll = 0;
+    let yaw = 0;
+    let yawOffset = 0;
+    let yawInitialized = false;
+    let yawRejectedCount = 0;
+
+    const attC = document.getElementById("att");
+    const att = attC.getContext("2d");
+    const attCX = attC.width / 2, attCY = attC.height / 2;
+    const attR = 190;
+    const PITCH_PX_PER_DEG = 4.0;
+
+    function clipCircle(ctx, cx, cy, r) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.clip();
+    }
+
+    function drawBezelAtt() {
+      att.strokeStyle = "rgba(255,255,255,0.9)";
+      att.lineWidth = 3;
+      att.beginPath();
+      att.arc(attCX, attCY, attR, 0, Math.PI * 2);
+      att.stroke();
+
+      att.strokeStyle = "rgba(255,255,255,0.15)";
+      att.lineWidth = 2;
+      att.beginPath();
+      att.arc(attCX, attCY, attR - 10, 0, Math.PI * 2);
+      att.stroke();
+    }
+
+    function drawPitchLadder(pitchOffsetPx) {
+      const ladderDegrees = [-30, -20, -10, 10, 20, 30];
+      att.strokeStyle = "white";
+      att.fillStyle = "white";
+      att.lineWidth = 2;
+      att.font = "14px sans-serif";
+
+      for (const pd of ladderDegrees) {
+        const y = pitchOffsetPx - pd * PITCH_PX_PER_DEG;
+        const lineLen = (Math.abs(pd) === 30) ? 140 : 110;
+
+        att.beginPath();
+        att.moveTo(-lineLen / 2, y);
+        att.lineTo(lineLen / 2, y);
+        att.stroke();
+
+        att.beginPath();
+        att.moveTo(-lineLen / 2, y);
+        att.lineTo(-lineLen / 2 + 12, y);
+        att.moveTo(lineLen / 2, y);
+        att.lineTo(lineLen / 2 - 12, y);
+        att.stroke();
+
+        const label = Math.abs(pd).toString();
+        att.fillText(label, -lineLen / 2 - 26, y + 5);
+        att.fillText(label, lineLen / 2 + 10, y + 5);
+      }
+    }
+
+    function drawRollScaleAtt() {
+      att.save();
+      att.translate(attCX, attCY);
+      att.strokeStyle = "white";
+      att.lineWidth = 2;
+      att.fillStyle = "white";
+      att.font = "12px sans-serif";
+
+      for (let a = -90; a <= 90; a += 10) {
+        const rad = deg2rad(a);
+        const isMajor = (a % 30 === 0) || (Math.abs(a) === 90);
+        const tickLen = isMajor ? 16 : 9;
+        const r1 = attR - 6;
+        const r2 = r1 - tickLen;
+
+        const x1 = r1 * Math.sin(rad), y1 = -r1 * Math.cos(rad);
+        const x2 = r2 * Math.sin(rad), y2 = -r2 * Math.cos(rad);
+
+        att.beginPath();
+        att.moveTo(x1, y1);
+        att.lineTo(x2, y2);
+        att.stroke();
+
+        if (a === -60 || a === -30 || a === 30 || a === 60 || a === 90 || a === -90) {
+          const label = Math.abs(a).toString();
+          const rl = r2 - 14;
+          const xl = rl * Math.sin(rad), yl = -rl * Math.cos(rad);
+          att.fillText(label, xl - 7, yl + 4);
+        }
+      }
+
+      att.fillStyle = "white";
+      att.beginPath();
+      att.moveTo(0, -(attR - 2));
+      att.lineTo(-8, -(attR - 18));
+      att.lineTo(8, -(attR - 18));
+      att.closePath();
+      att.fill();
+
+      att.restore();
+    }
+
+    function drawAircraftSymbolAtt() {
+      att.strokeStyle = "yellow";
+      att.lineWidth = 3;
+      att.beginPath();
+      att.moveTo(attCX - 50, attCY);
+      att.lineTo(attCX - 10, attCY);
+      att.moveTo(attCX + 10, attCY);
+      att.lineTo(attCX + 50, attCY);
+      att.moveTo(attCX, attCY - 28);
+      att.lineTo(attCX, attCY + 28);
+      att.stroke();
+
+      att.fillStyle = "yellow";
+      att.beginPath();
+      att.arc(attCX, attCY, 3, 0, Math.PI * 2);
+      att.fill();
+    }
+
+    function drawAttitude(pitchDeg, rollDeg) {
+      att.clearRect(0, 0, attC.width, attC.height);
+
+      att.save();
+      clipCircle(att, attCX, attCY, attR);
+
+      att.translate(attCX, attCY);
+      att.rotate(-deg2rad(rollDeg));
+
+      const pitchOffsetPx = pitchDeg * PITCH_PX_PER_DEG;
+
+      att.fillStyle = "#4a90e2";
+      att.fillRect(-600, -600 + pitchOffsetPx, 1200, 600);
+
+      att.fillStyle = "#8b5a2b";
+      att.fillRect(-600, pitchOffsetPx, 1200, 600);
+
+      att.strokeStyle = "white";
+      att.lineWidth = 2;
+      att.beginPath();
+      att.moveTo(-260, pitchOffsetPx);
+      att.lineTo(260, pitchOffsetPx);
+      att.stroke();
+
+      drawPitchLadder(pitchOffsetPx);
+
+      att.restore();
+
+      drawRollScaleAtt();
+      drawBezelAtt();
+      drawAircraftSymbolAtt();
+    }
+
+    const hdgC = document.getElementById("hdg");
+    const hdg = hdgC.getContext("2d");
+    const hdgCX = hdgC.width / 2, hdgCY = hdgC.height / 2;
+    const hdgR = 130;
+
+    function drawBezelHdg() {
+      hdg.strokeStyle = "rgba(255,255,255,0.9)";
+      hdg.lineWidth = 3;
+      hdg.beginPath();
+      hdg.arc(hdgCX, hdgCY, hdgR, 0, Math.PI * 2);
+      hdg.stroke();
+
+      hdg.strokeStyle = "rgba(255,255,255,0.15)";
+      hdg.lineWidth = 2;
+      hdg.beginPath();
+      hdg.arc(hdgCX, hdgCY, hdgR - 10, 0, Math.PI * 2);
+      hdg.stroke();
+    }
+
+    function drawHeading(yawDeg) {
+  const yawW = wrap360(yawDeg);
+
+  hdg.clearRect(0, 0, hdgC.width, hdgC.height);
+
+  hdg.save();
+  clipCircle(hdg, hdgCX, hdgCY, hdgR);
+
+  hdg.translate(hdgCX, hdgCY);
+
+  // Rotate compass card opposite to aircraft heading
+  hdg.rotate(-deg2rad(yawW));
+
+  hdg.fillStyle = "#111";
+  hdg.fillRect(-300, -300, 600, 600);
+
+  hdg.strokeStyle = "white";
+  hdg.fillStyle = "white";
+  hdg.lineWidth = 2;
+  hdg.font = "14px sans-serif";
+  hdg.textAlign = "center";
+  hdg.textBaseline = "middle";
+
+  for (let a = 0; a < 360; a += 10) {
+    const rad = deg2rad(a);
+    const isMajor = (a % 30 === 0);
+    const tickLen = isMajor ? 14 : 8;
+    const r1 = hdgR - 6;
+    const r2 = r1 - tickLen;
+
+    const x1 = r1 * Math.sin(rad), y1 = -r1 * Math.cos(rad);
+    const x2 = r2 * Math.sin(rad), y2 = -r2 * Math.cos(rad);
+
+    hdg.beginPath();
+    hdg.moveTo(x1, y1);
+    hdg.lineTo(x2, y2);
+    hdg.stroke();
+
+    if (isMajor) {
+      const rl = r2 - 18;
+      const xl = rl * Math.sin(rad), yl = -rl * Math.cos(rad);
+      let label = "";
+      if (a === 0) label = "N";
+      else if (a === 90) label = "E";
+      else if (a === 180) label = "S";
+      else if (a === 270) label = "W";
+      else label = (a / 10).toString();
+      hdg.fillText(label, xl, yl);
+    }
+  }
+
+  hdg.restore();
+
+  hdg.fillStyle = "yellow";
+  hdg.beginPath();
+  hdg.moveTo(hdgCX, hdgCY - (hdgR - 4));
+  hdg.lineTo(hdgCX - 10, hdgCY - (hdgR - 24));
+  hdg.lineTo(hdgCX + 10, hdgCY - (hdgR - 24));
+  hdg.closePath();
+  hdg.fill();
+
+  hdg.fillStyle = "white";
+  hdg.font = "18px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+  hdg.textAlign = "center";
+  hdg.textBaseline = "middle";
+  const txt = yawW.toFixed(0).padStart(3, "0");
+  hdg.fillText(txt, hdgCX, hdgCY);
+
+  drawBezelHdg();
+}
+
+    function render() {
+      const yawAdj = wrap360(-yaw + yawOffset);
+      readout.textContent = `Pitch: ${pitch.toFixed(1)}° | Roll: ${roll.toFixed(1)}° | Yaw: ${yawAdj.toFixed(1)}°`;
+
+      drawAttitude(pitch, roll);
+      drawHeading(yawAdj);
+
+      requestAnimationFrame(render);
+    }
+    render();
+
+    let pollTimer = null;
+    let lastUpdateMs = 0;
+
+    function applyMeasurement(r, p, y) {
+      const alpha = 0.45;
+      roll = roll * (1 - alpha) + r * alpha;
+      pitch = pitch * (1 - alpha) + p * alpha;
+
+      if (!yawInitialized) {
+        yaw = y;
+        yawInitialized = true;
+        return;
+      }
+
+      const yawWrapped = wrap360(y);
+      const prevWrapped = wrap360(yaw);
+      let delta = yawWrapped - prevWrapped;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+
+      // Reject sudden yaw jumps (likely mag glitches).
+      const maxJumpDeg = 25;
+      if (Math.abs(delta) > maxJumpDeg) {
+        yawRejectedCount += 1;
+        if (yawRejectedCount >= 3) {
+          yaw = y;
+          yawRejectedCount = 0;
+        }
+        return;
+      }
+
+      yawRejectedCount = 0;
+      yaw = yaw * (1 - alpha) + y * alpha;
+    }
+
+    async function pollLatest() {
+      try {
+        const res = await fetch("/latest", { cache: "no-store" });
+        if (!res.ok) {
+          statusEl.textContent = `Status: server error (${res.status})`;
+          return;
+        }
+
+        const data = await res.json();
+        const r = Number(data.roll);
+        const p = Number(data.pitch);
+        const y = Number(data.yaw);
+
+        if (Number.isFinite(r) && Number.isFinite(p) && Number.isFinite(y)) {
+          applyMeasurement(r, p, y);
+        }
+
+        if (Number.isFinite(data.updated_ms)) {
+          lastUpdateMs = data.updated_ms;
+        }
+
+        const ageMs = Date.now() - lastUpdateMs;
+        if (lastUpdateMs === 0) {
+          statusEl.textContent = "Status: waiting for Pico packets";
+        } else if (ageMs > 2000) {
+          statusEl.textContent = `Status: stale data (${Math.round(ageMs / 1000)}s old)`;
+        } else {
+          statusEl.textContent = `Status: live from ${data.source || "Pico"}`;
+        }
+      } catch (_e) {
+        statusEl.textContent = "Status: cannot reach server";
+      }
+    }
+
+    connectBtn.onclick = () => {
+      if (pollTimer) return;
+      connectBtn.textContent = "Streaming...";
+      statusEl.textContent = "Status: connecting to local server...";
+
+      pollLatest();
+      pollTimer = setInterval(pollLatest, 50);
+    };
+  </script>
+</body>
+</html>

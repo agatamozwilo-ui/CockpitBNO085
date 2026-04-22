@@ -1,3 +1,4 @@
+<!-- Mælaborð fyrir Airbus A300-600ST Beluga, byggt með HTML5 Canvas og JavaScript. Sýnir attitude (pitch og roll) og heading (yaw) í rauntíma, með gögnum fengnum frá Pico BNO085 skynjara í gegnum WebSocket tengingu við Python server. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -40,7 +41,7 @@
     }
     input { width: 340px; }
     p { margin: 10px 0 6px; }
-
+    
     button {
       margin: 12px;
       padding: 10px 16px;
@@ -55,7 +56,7 @@
 
   <h2>Mælaborð Airbus A300-600ST Beluga</h2>
   
-
+<!-- Tengist og sýnir gildi frá Pico BNO085 skynjara í rauntíma -->
   <div>
     <button id="connectBtn">Tengjast</button>
   
@@ -72,7 +73,7 @@
       <canvas id="hdg" width="300" height="300"></canvas>
     </div>
   </div>
-
+<!-- Sýnir núverandi pitch, roll og yaw gildi í textaformi fyrir debugging og nákvæmni -->
   <div class="readout" id="readout">Pitch: 0.0° | Roll: 0.0° | Yaw: 0.0°</div>
 
   <div class="controls">
@@ -87,6 +88,7 @@
   </div>
 
   <script>
+    <!-- JavaScript kóði sem sér um að teikna attitude og heading mæla á canvas, og uppfæra þau í rauntíma með gögnum frá server. Inniheldur einnig smoothing fyrir mýkri hreyfingar og glitch rejection fyrir yaw. -->
     function deg2rad(d) { return d * Math.PI / 180; }
 
     function wrap360(deg) {
@@ -94,18 +96,18 @@
       if (x < 0) x += 360;
       return x;
     }
-
+    
     const readout = document.getElementById("readout");
     const connectBtn = document.getElementById("connectBtn");
     const statusEl = document.getElementById("status");
-
+    // Upphafs gildi fyrir mælaborð 
     let pitch = 0;
     let roll = 0;
     let yaw = 0;
     let yawOffset = 0;
     let yawInitialized = false;
     let yawRejectedCount = 0;
-
+    //Setja upp attitude mæli 
     const attC = document.getElementById("att");
     const att = attC.getContext("2d");
     const attCX = attC.width / 2, attCY = attC.height / 2;
@@ -131,36 +133,36 @@
       att.arc(attCX, attCY, attR - 10, 0, Math.PI * 2);
       att.stroke();
     }
-
+    
     function drawPitchLadder(pitchOffsetPx) {
       const ladderDegrees = [-30, -20, -10, 10, 20, 30];
       att.strokeStyle = "white";
       att.fillStyle = "white";
       att.lineWidth = 2;
       att.font = "14px sans-serif";
-
+       // Teikna pitch ladder línur og tölur á attitude mælinum
       for (const pd of ladderDegrees) {
         const y = pitchOffsetPx - pd * PITCH_PX_PER_DEG;
         const lineLen = (Math.abs(pd) === 30) ? 140 : 110;
-
+        // Lína fyrir pitch mark
         att.beginPath();
         att.moveTo(-lineLen / 2, y);
         att.lineTo(lineLen / 2, y);
         att.stroke();
-
+       // Stuttar línur í endana
         att.beginPath();
         att.moveTo(-lineLen / 2, y);
         att.lineTo(-lineLen / 2 + 12, y);
         att.moveTo(lineLen / 2, y);
         att.lineTo(lineLen / 2 - 12, y);
         att.stroke();
-
+        // Tölur fyrir pitch 
         const label = Math.abs(pd).toString();
         att.fillText(label, -lineLen / 2 - 26, y + 5);
         att.fillText(label, lineLen / 2 + 10, y + 5);
       }
     }
-
+    // Teikna hreyfingu í kringum attitude mælinum
     function drawRollScaleAtt() {
       att.save();
       att.translate(attCX, attCY);
@@ -168,7 +170,7 @@
       att.lineWidth = 2;
       att.fillStyle = "white";
       att.font = "12px sans-serif";
-
+      
       for (let a = -90; a <= 90; a += 10) {
         const rad = deg2rad(a);
         const isMajor = (a % 30 === 0) || (Math.abs(a) === 90);
@@ -183,7 +185,7 @@
         att.moveTo(x1, y1);
         att.lineTo(x2, y2);
         att.stroke();
-
+        // Tölur fyrir roll
         if (a === -60 || a === -30 || a === 30 || a === 60 || a === 90 || a === -90) {
           const label = Math.abs(a).toString();
           const rl = r2 - 14;
@@ -191,7 +193,7 @@
           att.fillText(label, xl - 7, yl + 4);
         }
       }
-
+      //Þríhyrningurinn á attitude mælinum sem sýnir núverandi roll
       att.fillStyle = "white";
       att.beginPath();
       att.moveTo(0, -(attR - 2));
@@ -202,7 +204,7 @@
 
       att.restore();
     }
-
+    // Teikna krossinn í miðjunni á attitude mælinum
     function drawAircraftSymbolAtt() {
       att.strokeStyle = "yellow";
       att.lineWidth = 3;
@@ -220,7 +222,7 @@
       att.arc(attCX, attCY, 3, 0, Math.PI * 2);
       att.fill();
     }
-
+    // Teikna attitude mæli með núverandi pitch og roll gildi
     function drawAttitude(pitchDeg, rollDeg) {
       att.clearRect(0, 0, attC.width, attC.height);
 
@@ -253,12 +255,12 @@
       drawBezelAtt();
       drawAircraftSymbolAtt();
     }
-
+    // Setja upp heading mæli
     const hdgC = document.getElementById("hdg");
     const hdg = hdgC.getContext("2d");
     const hdgCX = hdgC.width / 2, hdgCY = hdgC.height / 2;
     const hdgR = 130;
-
+    //Rammi
     function drawBezelHdg() {
       hdg.strokeStyle = "rgba(255,255,255,0.9)";
       hdg.lineWidth = 3;
@@ -272,7 +274,7 @@
       hdg.arc(hdgCX, hdgCY, hdgR - 10, 0, Math.PI * 2);
       hdg.stroke();
     }
-
+    // Teikna heading mæli með núverandi yaw gildi
     function drawHeading(yawDeg) {
   const yawW = wrap360(yawDeg);
 
@@ -283,7 +285,7 @@
 
   hdg.translate(hdgCX, hdgCY);
 
-  // Rotate compass card opposite to aircraft heading
+  // Snúa þannig að núverandi yaw sé á toppnum
   hdg.rotate(-deg2rad(yawW));
 
   hdg.fillStyle = "#111";
@@ -295,7 +297,7 @@
   hdg.font = "14px sans-serif";
   hdg.textAlign = "center";
   hdg.textBaseline = "middle";
-
+ // Teikna línur og tölur fyrir heading mælinum
   for (let a = 0; a < 360; a += 10) {
     const rad = deg2rad(a);
     const isMajor = (a % 30 === 0);
@@ -305,12 +307,12 @@
 
     const x1 = r1 * Math.sin(rad), y1 = -r1 * Math.cos(rad);
     const x2 = r2 * Math.sin(rad), y2 = -r2 * Math.cos(rad);
-
+    // Lína fyrir heading 
     hdg.beginPath();
     hdg.moveTo(x1, y1);
     hdg.lineTo(x2, y2);
     hdg.stroke();
-
+    // Tölur fyrir heading
     if (isMajor) {
       const rl = r2 - 18;
       const xl = rl * Math.sin(rad), yl = -rl * Math.cos(rad);
@@ -323,7 +325,7 @@
       hdg.fillText(label, xl, yl);
     }
   }
-
+  //Þríhyrningur á heading mælinum sem sýnir núverandi yaw
   hdg.restore();
 
   hdg.fillStyle = "yellow";
@@ -343,7 +345,7 @@
 
   drawBezelHdg();
 }
-
+ // Aðal render lykkja sem uppfærir attitude og heading mæla í rauntíma með gögnum frá server. 
     function render() {
       const yawAdj = wrap360(-yaw + yawOffset);
       readout.textContent = `Pitch: ${pitch.toFixed(1)}° | Roll: ${roll.toFixed(1)}° | Yaw: ${yawAdj.toFixed(1)}°`;
@@ -354,7 +356,7 @@
       requestAnimationFrame(render);
     }
     render();
-
+   
     let pollTimer = null;
     let lastUpdateMs = 0;
 
@@ -368,14 +370,14 @@
         yawInitialized = true;
         return;
       }
-
+      //Ef nýtt yaw gildi er of langt frá því sem var áður, hafna því til að koma í veg fyrir glitchy hopp í heading mælinum
       const yawWrapped = wrap360(y);
       const prevWrapped = wrap360(yaw);
       let delta = yawWrapped - prevWrapped;
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
 
-      // Reject sudden yaw jumps (likely mag glitches).
+      
       const maxJumpDeg = 25;
       if (Math.abs(delta) > maxJumpDeg) {
         yawRejectedCount += 1;
@@ -385,7 +387,7 @@
         }
         return;
       }
-
+      // Mýkja yaw gildi með einfaldri exponential moving average filteri
       yawRejectedCount = 0;
       yaw = yaw * (1 - alpha) + y * alpha;
     }
@@ -397,12 +399,12 @@
           statusEl.textContent = `Status: server error (${res.status})`;
           return;
         }
-
+        // Bæta við gögnum frá server og uppfæra 
         const data = await res.json();
         const r = Number(data.roll);
         const p = Number(data.pitch);
         const y = Number(data.yaw);
-
+        // Ef gildi eru gildar tölur, uppfæra mælingar
         if (Number.isFinite(r) && Number.isFinite(p) && Number.isFinite(y)) {
           applyMeasurement(r, p, y);
         }
@@ -410,7 +412,7 @@
         if (Number.isFinite(data.updated_ms)) {
           lastUpdateMs = data.updated_ms;
         }
-
+        // Uppfæra status texta með aldri síðustu gagna frá server
         const ageMs = Date.now() - lastUpdateMs;
         if (lastUpdateMs === 0) {
           statusEl.textContent = "Status: waiting for Pico packets";
@@ -423,7 +425,8 @@
         statusEl.textContent = "Status: cannot reach server";
       }
     }
-
+    //Byrja að keyra um leið og buið er að ýta á Tengjast takkann
+    //Byrja að sækja gildi frá Python server
     connectBtn.onclick = () => {
       if (pollTimer) return;
       connectBtn.textContent = "Streaming...";

@@ -13,9 +13,9 @@
 #include "lwip/udp.h"
 
 // WiFi tenging
-#define WIFI_SSID "oli-iphone"
-#define WIFI_PASSWORD "Manchester"
-#define SERVER_IP "172.20.10.5"
+#define WIFI_SSID "" // Wi-Fi SSID/nafn 
+#define WIFI_PASSWORD "" // Wi-Fi lykilorð
+#define SERVER_IP "" // IP tala tölvunnar
 #define SERVER_PORT 5005
 #define WIFI_RETRY_INTERVAL_MS 30000
 

@@ -12,13 +12,14 @@
 #include "lwip/pbuf.h"
 #include "lwip/udp.h"
 
-
+// WiFi tenging
 #define WIFI_SSID "oli-iphone"
 #define WIFI_PASSWORD "Manchester"
 #define SERVER_IP "172.20.10.5"
 #define SERVER_PORT 5005
 #define WIFI_RETRY_INTERVAL_MS 30000
 
+// I2C tenging og pinnar
 #define I2C_PORT i2c0
 #define I2C_SDA_PIN 4
 #define I2C_SCL_PIN 5
@@ -26,6 +27,7 @@
 #define BNO_ADDR 0x4B
 #define I2C_FREQ_HZ 100000
 
+// BNO055 tenging
 #define SHTP_HEADER_LEN 4
 #define CHANNEL_CONTROL 2
 #define CHANNEL_REPORTS 3
@@ -33,6 +35,7 @@
 #define REPORT_SET_FEATURE_COMMAND 0xFD
 #define REPORTID_ROTATION_VECTOR 0x05
 
+//Staðlaðar breytur
 static uint8_t seq_num[6] = {0};
 static absolute_time_t last_wifi_retry_at;
 static struct udp_pcb *udp_client = NULL;
@@ -41,7 +44,7 @@ static ip_addr_t server_ip_addr;
 static bool time_is_set(absolute_time_t t) {
     return to_us_since_boot(t) != 0;
 }
-
+// Hjálparföll
 static int16_t i16_le(uint8_t b0, uint8_t b1) {
     int32_t v = b0 | (b1 << 8);
     if (v & 0x8000) {
@@ -62,11 +65,11 @@ static void init_i2c_bus(void) {
     gpio_pull_up(I2C_SDA_PIN);
     gpio_pull_up(I2C_SCL_PIN);
 }
-
+// BNO055 tenging og gagnavinnsla
 static bool packet_available(void) {
     return gpio_get(BNO_INT_PIN) == 0;
 }
-
+// SHTP pakkar hafa 4 bita header og allt að 60 bita payload
 static bool send_packet(uint8_t channel, const uint8_t *payload, size_t payload_len) {
     uint8_t packet[64];
     size_t packet_len = payload_len + SHTP_HEADER_LEN;
@@ -74,13 +77,14 @@ static bool send_packet(uint8_t channel, const uint8_t *payload, size_t payload_
     if (packet_len > sizeof(packet)) {
         return false;
     }
-
+// SHTP header: [0-1] = packet length, [2] = channel, [3] = sequence number
     packet[0] = (uint8_t)(packet_len & 0xFF);
     packet[1] = (uint8_t)((packet_len >> 8) & 0xFF);
     packet[2] = channel;
     packet[3] = seq_num[channel];
     memcpy(packet + SHTP_HEADER_LEN, payload, payload_len);
 
+//  senda pakkann í allt að 3 tilraunum með smá töf á milli
     for (int attempt = 0; attempt < 3; ++attempt) {
         int written = i2c_write_blocking(I2C_PORT, BNO_ADDR, packet, (int)packet_len, false);
         if (written == (int)packet_len) {
@@ -92,7 +96,7 @@ static bool send_packet(uint8_t channel, const uint8_t *payload, size_t payload_
 
     return false;
 }
-
+// Lesa SHTP
 static bool read_packet(uint8_t *channel, uint8_t *body, size_t *body_len) {
     uint8_t buf[64];
 
@@ -131,7 +135,7 @@ static bool wait_for_packet(uint32_t timeout_ms) {
     }
     return false;
 }
-
+// Senda SHTP "set feature" skipun til að biðja um reglulegan aflestur
 static bool set_feature(uint8_t report_id, uint32_t interval_ms) {
     uint32_t interval_us = interval_ms * 1000u;
     uint8_t payload[17] = {
@@ -149,7 +153,7 @@ static bool set_feature(uint8_t report_id, uint32_t interval_ms) {
 
     return send_packet(CHANNEL_CONTROL, payload, sizeof(payload));
 }
-
+// Fá fram Eulerhorn 
 static void quat_to_euler_deg(float x, float y, float z, float w, float *roll, float *pitch, float *yaw) {
     float sinr_cosp = 2.0f * (w * x + y * z);
     float cosr_cosp = 1.0f - 2.0f * (x * x + y * y);
@@ -167,7 +171,7 @@ static void quat_to_euler_deg(float x, float y, float z, float w, float *roll, f
     float cosy_cosp = 1.0f - 2.0f * (y * y + z * z);
     *yaw = atan2f(siny_cosp, cosy_cosp) * 57.2957795f;
 }
-
+// Fá fram roll, pitch og yaw 
 static bool extract_rotation_vector(const uint8_t *body, size_t body_len, float *roll, float *pitch, float *yaw) {
     size_t start = SIZE_MAX;
 
@@ -197,7 +201,7 @@ static bool extract_rotation_vector(const uint8_t *body, size_t body_len, float 
     quat_to_euler_deg(qi, qj, qk, qr, roll, pitch, yaw);
     return true;
 }
-
+// Wi-Fi tenging og UDP sending
 static bool connect_wifi(uint32_t timeout_ms) {
     for (int attempt = 1; attempt <= 2; ++attempt) {
         cyw43_arch_enable_sta_mode();
@@ -221,7 +225,7 @@ static bool connect_wifi(uint32_t timeout_ms) {
 
     return false;
 }
-
+// Tryggja að WiFi sé tengt áður en reynt er að senda UDP pakkann
 static bool ensure_wireless_ready(void) {
     absolute_time_t now = get_absolute_time();
     int link_status = cyw43_wifi_link_status(&cyw43_state, CYW43_ITF_STA);
@@ -241,7 +245,7 @@ static bool ensure_wireless_ready(void) {
 
     return true;
 }
-
+// Senda eina línu sem UDP 
 static void send_udp_line(const char *line) {
     if (!ensure_wireless_ready()) {
         return;
@@ -272,13 +276,13 @@ static void send_udp_line(const char *line) {
 
     cyw43_arch_lwip_end();
 }
-
+// Tryggja að WiFi sé tengt áður en reynt er að senda UDP pakkann
 static void send_wireless(const char *line) {
     if (ensure_wireless_ready()) {
         send_udp_line(line);
     }
 }
-
+// Aðal forritið!!!!
 int main(void) {
     stdio_init_all();
     sleep_ms(2000);
@@ -301,7 +305,7 @@ int main(void) {
         printf("UDP sender ready -> %s:%d\n", SERVER_IP, SERVER_PORT);
     }
 
-    printf("Waiting for startup packet...\n");
+    printf("Biða eftir startup packet...\n");
     bool startup_ok = false;
     uint8_t channel = 0;
     uint8_t body[64];
@@ -309,11 +313,11 @@ int main(void) {
 
     for (int attempt = 1; attempt <= 3; ++attempt) {
         if (wait_for_packet(3000) && read_packet(&channel, body, &body_len)) {
-            printf("Startup packet received on channel %u\n", channel);
+            printf("Startup packet móttekið á channel %u\n", channel);
             startup_ok = true;
             break;
         }
-        printf("No startup packet seen (attempt %d)\n", attempt);
+        printf("Enginn startup packet (tilraun %d)\n", attempt);
         init_i2c_bus();
         sleep_ms(200);
     }
@@ -341,7 +345,7 @@ int main(void) {
             printf("Failed to enable rotation vector\n");
         }
     }
-
+// Aðal lykkja: lesa pakka og senda út sem UDP
     while (true) {
         if (wait_for_packet(1000)) {
             if (read_packet(&channel, body, &body_len) && channel == CHANNEL_REPORTS) {
